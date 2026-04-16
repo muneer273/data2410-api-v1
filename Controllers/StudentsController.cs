@@ -97,15 +97,57 @@ public class StudentsController(IConfiguration config) : ControllerBase
         return rows == 0 ? NotFound() : NoContent();
     }
 
-    [HttpPost("calculate-grades")]
-    public async Task<ActionResult<List<Student>>> CalculateGrades()
+[HttpPost("calculate-grades")]
+public async Task<ActionResult<List<Student>>> CalculateGrades()
+{
+    var studentsWithGrade = new List<Student>();
+
+    using (SqlConnection conn = new SqlConnection(_connectionString))
     {
-        var studentsWithGrade = new List<Student>();
+        await conn.OpenAsync();
 
-        // Write code to calculate and update grades
+       
+        string selectQuery = "SELECT * FROM Students";
+        using (SqlCommand cmd = new SqlCommand(selectQuery, conn))
+        {
+            using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var student = new Student
+                    {
+                        Id = Convert.ToInt32(reader["id"]),
+                        Name = reader["name"].ToString(),
+                        Course = reader["course"].ToString(),
+                        Marks = Convert.ToInt32(reader["marks"]),
+                        Grade = reader["grade"]?.ToString()
+                    };
 
-        return studentsWithGrade;
+                   
+                    student.Grade = GetGrade(student.Marks);
+
+                    studentsWithGrade.Add(student);
+                }
+            }
+        }
+
+        foreach (var student in studentsWithGrade)
+        {
+            string updateQuery = "UPDATE Students SET grade = @grade WHERE id = @id";
+
+            using (SqlCommand updateCmd = new SqlCommand(updateQuery, conn))
+            {
+                updateCmd.Parameters.AddWithValue("@grade", student.Grade);
+                updateCmd.Parameters.AddWithValue("@id", student.Id);
+
+                await updateCmd.ExecuteNonQueryAsync();
+            }
+        }
     }
+
+   
+    return studentsWithGrade;
+}
 
     [HttpGet("report")]
     public async Task<IActionResult> Report()
@@ -127,3 +169,4 @@ public class StudentsController(IConfiguration config) : ControllerBase
         return rows == 0 ? NotFound() : NoContent();
     }
 }
+

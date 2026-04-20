@@ -100,60 +100,92 @@ public class StudentsController(IConfiguration config) : ControllerBase
 [HttpPost("calculate-grades")]
 public async Task<ActionResult<List<Student>>> CalculateGrades()
 {
-    var studentsWithGrade = new List<Student>();
+   var studentsWithGrade = new List<Student>();
 
-    using (SqlConnection conn = new SqlConnection(_connectionString))
+using (SqlConnection conn = new SqlConnection(_connectionString))
+{
+    await conn.OpenAsync();
+
+    string selectQuery = "SELECT Id, Name, Course, Marks FROM Students";
+
+    using (SqlCommand cmd = new SqlCommand(selectQuery, conn))
     {
-        await conn.OpenAsync();
-
-       
-        string selectQuery = "SELECT * FROM Students";
-        using (SqlCommand cmd = new SqlCommand(selectQuery, conn))
+        using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
         {
-            using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+            while (await reader.ReadAsync())
             {
-                while (await reader.ReadAsync())
+                var student = new Student
                 {
-                    var student = new Student
-                    {
-                        Id = Convert.ToInt32(reader["id"]),
-                        Name = reader["name"].ToString(),
-                        Course = reader["course"].ToString(),
-                        Marks = Convert.ToInt32(reader["marks"]),
-                        Grade = reader["grade"]?.ToString()
-                    };
+                    Id = Convert.ToInt32(reader["Id"]),
+                    Name = reader["Name"].ToString(),
+                    Course = reader["Course"].ToString(),
+                    Marks = Convert.ToInt32(reader["Marks"])
+                };
 
-                   
-                    student.Grade = GetGrade(student.Marks);
-
-                    studentsWithGrade.Add(student);
-                }
-            }
-        }
-
-        foreach (var student in studentsWithGrade)
-        {
-            string updateQuery = "UPDATE Students SET grade = @grade WHERE id = @id";
-
-            using (SqlCommand updateCmd = new SqlCommand(updateQuery, conn))
-            {
-                updateCmd.Parameters.AddWithValue("@grade", student.Grade);
-                updateCmd.Parameters.AddWithValue("@id", student.Id);
-
-                await updateCmd.ExecuteNonQueryAsync();
+                student.Grade = GetGrade(student.Marks);
+                studentsWithGrade.Add(student);
             }
         }
     }
 
-   
-    return studentsWithGrade;
+    foreach (var student in studentsWithGrade)
+    {
+        string updateQuery = "UPDATE Students SET Grade = @grade WHERE Id = @id";
+
+        using (SqlCommand updateCmd = new SqlCommand(updateQuery, conn))
+        {
+            updateCmd.Parameters.AddWithValue("@grade", student.Grade);
+            updateCmd.Parameters.AddWithValue("@id", student.Id);
+
+            await updateCmd.ExecuteNonQueryAsync();
+        }
+    }
+}
+
+return studentsWithGrade;
 }
 
     [HttpGet("report")]
     public async Task<IActionResult> Report()
     {
-        // Write code for the report generation logic.
-        return Ok();
+         using var conn = new SqlConnection(_connectionString);
+    await conn.OpenAsync();
+
+    string query = @"
+        SELECT 
+            Course AS courseName,
+            COUNT(*) AS totalStudents,
+            AVG(Marks) AS averageMarks,
+            SUM(CASE WHEN Grade = 'A' THEN 1 ELSE 0 END) AS A,
+            SUM(CASE WHEN Grade = 'B' THEN 1 ELSE 0 END) AS B,
+            SUM(CASE WHEN Grade = 'C' THEN 1 ELSE 0 END) AS C,
+            SUM(CASE WHEN Grade = 'D' THEN 1 ELSE 0 END) AS D
+        FROM Students
+        GROUP BY Course
+    ";
+
+    using var cmd = new SqlCommand(query, conn);
+    using var reader = await cmd.ExecuteReaderAsync();
+
+    var report = new List<object>();
+
+    while (await reader.ReadAsync())
+    {
+        report.Add(new
+        {
+            courseName = reader["courseName"],
+            totalStudents = reader["totalStudents"],
+            averageMarks = reader["averageMarks"],
+            gradeDistribution = new
+            {
+                A = reader["A"],
+                B = reader["B"],
+                C = reader["C"],
+                D = reader["D"]
+            }
+        });
+    }
+        return Ok(report);
     }
 
     [HttpDelete("{id}")]
